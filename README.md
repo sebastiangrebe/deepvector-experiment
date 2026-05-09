@@ -52,3 +52,70 @@ configs/        # experiment YAMLs
 scripts/        # CLI entrypoints (smoke test, ingestion, eval)
 notebooks/      # exploration
 ```
+
+## Cloud Run (Codestral-Mamba-7B baseline on H100)
+
+The full Codestral baseline does not fit M5 Max budgets (~17h on MPS) and the
+pure-PyTorch Mamba-2 path OOMs at 1500-token chunks (it materializes a
+`(B, T, T, ...)` intermediate). The fast-path CUDA kernels (`causal-conv1d`
++ `mamba-ssm`) are required.
+
+### Provision
+
+1. Lambda Cloud → spin up `gpu_1x_h100_pcie` ($2.49/h). Ubuntu 22.04 preferred,
+   24.04 acceptable. CUDA 12.1/12.4/12.6/12.8 supported. CUDA 13+ may break
+   `mamba-ssm` builds.
+2. Add your `~/.ssh/id_ed25519.pub` to Lambda's "SSH Keys" page.
+3. SSH in once the instance is up.
+
+### Verify environment (dry-run)
+
+```bash
+git clone git@github.com:sebastiangrebe/deepvector-experiment.git
+cd deepvector-experiment
+bash scripts/cloud_run.sh --dry-run
+```
+
+Confirms CUDA version, GPU model, env vars. **Does not** install or run the
+eval. Catches misconfigured boxes in <30 seconds.
+
+### Full run
+
+```bash
+export HF_TOKEN=hf_...        # required (Codestral may be gated)
+export GIT_PUSH=1             # optional — push results JSON via git
+export GH_TOKEN=github_pat_... # required when GIT_PUSH=1 (HTTPS push token)
+nohup bash scripts/cloud_run.sh > /tmp/cloud_run.log 2>&1 &
+tail -f /tmp/cloud_run.log
+```
+
+Phases (each prints `=== Phase N/7 ===`): diagnostics → PyTorch → causal-conv1d
+→ mamba-ssm → kernel sanity → dataset/repos → eval + dtype sanity.
+
+Hard-fails on any unrecoverable issue. No silent fallbacks.
+
+### Total time + cost
+
+```
+Phase 1 (diagnostics)       <30 s
+Phase 2 (PyTorch install)   ~3 min
+Phase 3 (causal-conv1d)     ~5-10 min     (skipped on rerun if importable)
+Phase 4 (mamba-ssm)         ~10-20 min    (skipped on rerun if importable)
+Phase 5 (kernel sanity)     <30 s
+Phase 6 (dataset + repos)   ~5 min
+Phase 7 (eval + dtype)      ~2-2.5 h
+
+Total: ~2.5-3 h on a fresh box; $6-8 at $2.49/h
+```
+
+### Pull results + tear down
+
+From local Mac:
+
+```bash
+bash scripts/cloud_teardown.sh ubuntu@<INSTANCE_IP>
+```
+
+Pulls `data/results/mamba_codestral_baseline.json`,
+`data/results/dtype_sanity_codestral.json`, and the `cloud_run.log` snapshot.
+Then **terminate** the instance from the Lambda dashboard.
