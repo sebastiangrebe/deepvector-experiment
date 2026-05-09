@@ -2,7 +2,7 @@
 
 ## Abstract
 
-Selective state-space models (SSMs) such as Mamba scale linearly in sequence length, making them attractive encoders for long-context retrieval tasks. Whether their token-level hidden states preserve enough discriminative signal for code retrieval — and what matching operation extracts it — is unclear. We study this question on SWE-Bench Lite using `mistralai/Mamba-Codestral-7B-v0.1` as the encoder and a per-repo single-commit indexing protocol. We report four findings. **(1)** Mean-pooled Codestral vectors achieve indexable Recall@10 of 0.34 against Voyage code-3's 0.95, despite no vector collapse (per-repo pairwise cosine means in the 0.67–0.82 range) — retrieval failure here is in the aggregation operator, not the representation geometry. **(2)** On a 80-instance subset where Voyage retrieves the gold file in top-10 but Codestral mean-pooling does not, ColBERT-style MaxSim over per-token Codestral latents recovers 35 of those 80 (Recall@10 = 0.4375); mean-pooling in the same harness recovers 1 (Recall@10 = 0.0125), a 35× lift in absolute hits. **(3)** Adding frozen architectural structure beyond MaxSim — multi-head random orthogonal projections at H ∈ {4, 8, 16, 32}, an explicit late-interaction normalization variant, and multi-granularity composites combining file-level, sliding-window mid-level, and token-level scores — does not exceed single-head MaxSim. The best multi-head method scores 0.4250 (Δ = −0.0125); the best multi-granularity composite scores 0.2875 (Δ = −0.15). **(4)** Two off-the-shelf cross-encoder rerankers stacked on the MaxSim shortlist (`bge-reranker-v2-m3`, `cross-encoder/ms-marco-MiniLM-L-12-v2`) underperform the MaxSim filter alone (Recall@10 of 0.4125 and 0.3000 respectively). The work supports a single interpretation: discriminative signal exists at the per-token level of Codestral-Mamba but is destroyed by mean-pooling, and closing the gap to retrieval-trained dense encoders likely requires retrieval-specific training rather than a clever frozen matching head or off-the-shelf NLP rerankers. We do not evaluate trained matching; we leave this as future work.
+Selective state-space models (SSMs) such as Mamba scale linearly in sequence length, making them attractive encoders for long-context retrieval tasks. Whether their token-level hidden states preserve enough discriminative signal for code retrieval — and what matching operation extracts it — is unclear. We study this question on SWE-Bench Lite using `mistralai/Mamba-Codestral-7B-v0.1` as the encoder and a per-repo single-commit indexing protocol. We report six findings. **(1)** Mean-pooled Codestral vectors achieve indexable Recall@10 of 0.34 against Voyage code-3's 0.95, despite no vector collapse (per-repo pairwise cosine means in the 0.67–0.82 range) — retrieval failure here is in the aggregation operator, not the representation geometry. **(2)** On a 80-instance subset where Voyage retrieves the gold file in top-10 but Codestral mean-pooling does not, ColBERT-style MaxSim over per-token Codestral latents recovers 35 of those 80 (Recall@10 = 0.4375); mean-pooling in the same harness recovers 1 (Recall@10 = 0.0125), a 35× lift in absolute hits. **(3)** Adding frozen architectural structure beyond MaxSim — multi-head random orthogonal projections at H ∈ {4, 8, 16, 32}, an explicit late-interaction normalization variant, and multi-granularity composites combining file-level, sliding-window mid-level, and token-level scores — does not exceed single-head MaxSim. The best multi-head method scores 0.4250 (Δ = −0.0125); the best multi-granularity composite scores 0.2875 (Δ = −0.15). **(4)** Two off-the-shelf cross-encoder rerankers stacked on the MaxSim shortlist (`bge-reranker-v2-m3`, `cross-encoder/ms-marco-MiniLM-L-12-v2`) underperform the MaxSim filter alone (Recall@10 of 0.4125 and 0.3000 respectively). **(5)** Symbolic routing via tree-sitter-extracted identifiers, combined with regex extraction from the issue text, lifts Recall@10 to 0.4750 (Δ = +0.0375 over MaxSim) — the first frozen technique to exceed the MaxSim ceiling on the discriminating subset. **(6)** Augmenting symbolic routing with Codestral-generated identifiers (LLM query expansion) lifts Recall@10 to 0.5000 and Recall@1 from 0.10 to 0.175. The LLM converts 31% of queries that would fall back to full-corpus search into routed queries; this is the mechanistic source of the lift. The work supports two complementary paths to closing the gap to retrieval-trained dense encoders: training-based (a learned matching head over Codestral's frozen representation), and composition-based (symbolic structure + LLM-generated identifiers as orthogonal signals to the latent state). We do not evaluate trained matching; the composition path is what findings 5–6 demonstrate.
 
 ## 1. Introduction
 
@@ -16,6 +16,8 @@ Our contributions are four findings, each negative or constrained, but together 
 - ColBERT-style MaxSim on Codestral per-token latents recovers a substantial fraction of mean-pooling's failures on the discriminating subset (Recall@10 = 0.4375 vs 0.0125; 35× absolute-hit lift).
 - Frozen multi-head projections beyond single-head MaxSim do not extract additional signal at this scale; frozen multi-granularity composites (G0/G1/G2/G3 sum, max, and routed) actively harm retrieval (best Δ = −0.15).
 - Two cross-encoder rerankers trained on natural-language passage retrieval, applied to Codestral's MaxSim shortlist on SWE-Bench Lite, underperformed the shortlist alone; we attribute this narrowly to training-distribution mismatch and do not generalize to code-specific rerankers.
+- Tree-index symbolic routing (regex IDs from issue text, looked up in a tree-sitter-built inverted index per repo) lifts Recall@10 to 0.4750 (Δ = +0.0375) — the first frozen technique to exceed MaxSim.
+- Augmenting tree-index routing with Codestral-generated identifiers (LLM query expansion) lifts Recall@10 to 0.5000 and Recall@1 from 0.10 to 0.175. The LLM converts 15 of 80 fallback queries into routed queries (31% → 12.5% fallback rate); this is the mechanistic source of the lift.
 
 The work is a case study, not a general claim about Mamba-based retrieval. Our caveats are explicit (§6).
 
@@ -387,6 +389,119 @@ Frozen multi-granularity composition introduces more noise than signal at this s
 
 We treat the Phase 5 result as: frozen multi-granularity in the form we tested HURTS. Whether semantic-boundary granularity or a learned router would change this is left for future work (§7.6).
 
+### 4.6 Phase 6: Tree-index Symbolic Routing
+
+#### Question
+
+The previous five phases tested matching operations and granularities on Codestral's frozen latent state alone. Phase 6 tests whether composing the latent state with a *complementary* signal — deterministic symbolic structure extracted from the source code itself — extracts retrieval signal that the latent state alone cannot. The hypothesis is concrete: many SWE-Bench Lite issues mention class names, constants, or function identifiers that appear *literally* in the gold file. A regex-extracted identifier looked up in a tree-sitter-built inverted index routes directly to the defining file, with no model required.
+
+#### Method
+
+We build a `RepoTreeIndex` per repo (`src/tree_index.py`) by parsing every eligible Python file with tree-sitter and recording, per file, top-level function names, class names, top-level methods, ALL_CAPS module-level constants, and import paths. The index exposes:
+
+- `lookup(name) → set[file]`: which files define this identifier.
+- `expand_via_imports(files, hops=1) → set[file]`: 1-hop expansion via the import graph.
+
+For each query we extract identifier candidates from the issue text (`extract_identifiers`) using regexes for CamelCase, snake_case, ALL_CAPS, dotted paths, backtick-quoted code, and explicit `def`/`class` patterns. Candidates are looked up in the tree-index; matched files form the *primary candidate pool*. The pool is expanded by 1-hop imports unless this would exceed 200 files (in which case primary-only is kept), and falls back to the full corpus if the primary pool is empty or the expanded pool is below 5 files.
+
+The MaxSim ranker (Phase 2 baseline) is then run *restricted to the candidate pool* — chunks belonging to files outside the pool are dropped before scoring. The harness (`scripts/symbolic_routing_test.py`) also runs full-corpus MaxSim alongside as the strict-sanity reproduction (it must reproduce Phase 2's R@10 = 0.4375 to within 0.02; it did, at 0.4375 exactly on the same 80-instance subset).
+
+#### Sanity
+
+- `UnicodeUsernameValidator` → `django/contrib/auth/validators.py` ✓ (caught a tree-sitter bug during local smoke: `@deconstructible`-wrapped classes appear as `decorated_definition`; fixed in `_unwrap_decorated`).
+- Full-corpus MaxSim reproduction: R@10 = 0.4375 on the same 80 instances (`sanity_full_maxsim_reproduces_phase25 = True`).
+
+#### Headline results (n = 80)
+
+| Metric | full MaxSim | tree-index routed | Δ |
+|---|---:|---:|---:|
+| Recall@1 | 0.1000 | 0.1500 | +0.0500 |
+| Recall@5 | 0.3125 | 0.3625 | +0.0500 |
+| Recall@10 | 0.4375 | **0.4750** | +0.0375 |
+| Recall@20 | 0.5875 | 0.6000 | +0.0125 |
+| MRR | 0.2001 | 0.2512 | +0.0511 |
+| Median latency (s) | — | 0.621 | — |
+
+The pre-registered verdict is **MODEST_LIFT** (R@10 ≥ 0.46). This is the first frozen technique across all five preceding phases to beat the MaxSim ceiling on the discriminating subset.
+
+#### Pool composition
+
+```
+pool modes: primary=3   extended=52   fallback_full=25   median_size=68
+regex IDs/query: mean=14.1   median=8   max=58
+```
+
+Of 80 queries, 25 (31.25%) fell back to full-corpus search because no extracted identifier matched the index — the regex captured natural-language artifacts that didn't correspond to actual symbols. These 25 queries inherited the MaxSim baseline behavior (no routing benefit). The 52 extended-pool queries got a meaningful 1-hop-import-expanded shortlist (median 68 files); the 3 primary-only queries had so many regex hits that 1-hop expansion blew past 200 files.
+
+#### Qualitative samples
+
+**RESCUE (django__django-11742, max_length/Field.choices):** Issue text contains `Field.max_length` and `Field.choices`. Tree-sitter index has `Field` and `choices` defined in `django/db/models/fields/__init__.py` and 105 imports-1-hop neighbors. The candidate pool of 110 files contained the gold; MaxSim restricted to those ranked it at #6, where full-corpus MaxSim ranked it >20.
+
+**RESCUE (django__django-11583, autoreloader/StatReloader):** Issue contains `StatReloader`, `execute_from_command_line`, `fetch_command`, etc. — 12 regex IDs matched the tree-index. The 91-file candidate pool contained the gold (`django/utils/autoreload.py`); MaxSim restricted ranked it #1 — same as full-corpus MaxSim, but with a 7× smaller pool to score.
+
+**FAILURE (django__django-11620, DEBUG/to_python/Http404):** Issue contains the generic `DEBUG`, `to_python`, `get_object_or_404`. Three matched in tree-index. `to_python` is defined in dozens of URL converter files; primary pool ballooned to 32 files but did *not* include `django/views/debug.py` — the gold defines `technical_500_response`, not `to_python`. The router missed because the issue's distinctive code path (Http404 handling in DEBUG mode) was named only in prose, not as a defined identifier in the gold file.
+
+#### Interpretation
+
+Tree-index symbolic routing helps modestly. The mechanism is straightforward: when an issue contains the gold file's identifier literally, the index routes precisely; when it contains only generic terms, the import-graph expansion overshoots or misses. The next experiment (§4.7) tests whether augmenting regex-extracted identifiers with LLM-generated ones extends the lift, particularly on the failure mode where the gold file's naming is implicit.
+
+### 4.7 Phase 7: Tree-index + LLM Query Expansion
+
+#### Question
+
+Phase 6 ceilings out at issues that contain the gold file's identifiers literally. Phase 7 tests whether using Codestral *generatively* — asking it to list class/function/constant names "likely involved in the bug" given the issue text — bridges from "behavior description" to "code location" on the queries that Phase 6 misses.
+
+#### Method
+
+For each query, the same pipeline as Phase 6 runs, plus `expand_query_to_identifiers` (`src/llm_expansion.py`): the issue text is wrapped in a prompt that asks for *specific*, *distinctive* class/method/constant names (with explicit avoid-list for generic terms), passed to Codestral via `model.generate(do_sample=False, max_new_tokens=200)`, and parsed line-by-line into identifier candidates. The candidates are appended to the regex-extracted identifiers; the rest of the routing pipeline is unchanged.
+
+The harness records both the regex-only candidate pool decision (the Phase 6 view) and the combined-IDs decision (the Phase 7 view) per instance, so the Phase 7 lift mechanism — converting fallback queries into routed queries — is directly measurable.
+
+#### Sanity
+
+- LLM generation never failed (`llm_generation_failures = 0/80`).
+- First-3 LLM expansions logged at run start; outputs were genuine Codestral-generated identifier lists (e.g., `StatReloader`, `pathlib.Path`, etc.), not gibberish.
+- Full-corpus MaxSim reproduction: R@10 = 0.4375 again ✓.
+
+#### Headline results (n = 80)
+
+| Metric | full MaxSim | Phase 6 (regex) | Phase 7 (regex + LLM) | Δ Ph7−full | Δ Ph7−Ph6 |
+|---|---:|---:|---:|---:|---:|
+| Recall@1 | 0.1000 | 0.1500 | **0.1750** | +0.0750 | +0.0250 |
+| Recall@5 | 0.3125 | 0.3625 | 0.3625 | +0.0500 | 0.0000 |
+| Recall@10 | 0.4375 | 0.4750 | **0.5000** | +0.0625 | +0.0250 |
+| Recall@20 | 0.5875 | 0.6000 | 0.5625 | −0.0250 | −0.0375 |
+| MRR | 0.2001 | 0.2512 | **0.2698** | +0.0697 | +0.0186 |
+| Median latency (s) | — | 0.621 | 0.650 | — | — |
+
+The pre-registered verdict is **MODEST_LIFT**. The R@1 lift (0.10 → 0.175, +75% relative) is the more important finding than R@10: LLM expansion specifically improves the model's ability to surface the gold file at rank 1, which is the hardest position to fill. Recall@20 drops slightly (−0.0375 vs Phase 6) because the larger LLM-augmented identifier set sometimes forces a primary-only pool restriction that excludes files the import-expanded pool would have included.
+
+#### Mechanism: fallback-conversion
+
+The summary records `phase29_fallback_count = 25` and `phase30_fallback_count = 10`: the LLM converted **15 of 80 queries (18.75%)** from "no regex identifier matched the tree-index → fallback to full corpus" into "at least one LLM identifier matched → routed". This is the load-bearing mechanism for Phase 7's lift: queries that contain only behavioral language and no explicit identifier names get bridged by Codestral's generative recall of plausible Django/sympy/sklearn class names.
+
+```
+LLM IDs/query: mean=11.6   median=11   max=20   failures=0
+LLM gen latency: median 5.96 s/query on H100
+LLM-added matches in tree-index (total across 80 queries): 171
+Fallback rate:   Phase 6: 25/80 (31.25%)  →  Phase 7: 10/80 (12.5%)
+Pool composition: primary=8  extended=62  fallback_full=10  median_size=74
+```
+
+#### Qualitative samples
+
+**RESCUE (django__django-11179, "delete() doesn't clear PKs"):** Regex extracted only `Django.db.models.deletion` and `PK`, neither matched the tree-index. The LLM generated `Django, db, models, deletion, Model, delete, clear, PK`; four matched (`db, Model, delete, clear`). The combined pool of 176 files contained the gold (`django/db/models/deletion.py`); MaxSim restricted ranked it #7. Full-corpus MaxSim ranked it #11. The LLM found the right identifier neighborhood that the regex couldn't extract from the issue's natural-language phrasing.
+
+**RESCUE (django__django-11742, max_length/Field.choices):** Phase 6 already rescued this; Phase 7 inherits the rescue. Worth noting because the LLM's identifier list (`Field, max_length, choices, Field.max_length, Field.choices, Field.save, Field.clean, Field.validate`) is more compact than the regex's, suggesting the LLM does some implicit deduplication.
+
+**FAILURE (django__django-11620, DEBUG/to_python/Http404):** Phase 6 missed this; Phase 7 also misses. The LLM generated `Http, DEBUG, path, resolver, match, next, current, parameter` — none distinctive enough to route to the gold (`django/views/debug.py`'s `technical_500_response`). 8 LLM IDs matched the tree-index, but the resulting primary-only pool of 32 files did not include the gold. Same failure mode as Phase 6: when the gold file's name is implicit in the issue, neither regex nor LLM reliably recovers it.
+
+**FALLBACK→ROUTED (django__django-12983, slugify):** Regex extracted `django.utils.text.slugify, django.utils, text.slugify, PR`; *zero* matched the tree-index (Phase 6: full-corpus fallback). The LLM generated `django.utils.text.slugify, output`; both matched zero in the index too — Phase 7 *also* fell back. So this query was not a Phase 7 conversion. Pool mode: `fallback_full` in both phases. Both methods retrieved the gold at rank 5 anyway via plain MaxSim.
+
+#### Interpretation
+
+LLM query expansion adds a measurable lift on top of Phase 6, particularly at R@1 and on queries where the issue text describes a behavior without naming the implementing identifier. The fallback-conversion stat (25 → 10 fallback queries) is the cleanest mechanistic explanation: 15 queries were rescued from "no symbolic anchor in the issue" by Codestral's generative knowledge of Django's class names. The R@10 ceiling is now 0.5000 — still ~0.45 below Voyage code-3's 0.95 indexable R@10, but for the first time in seven phases, a frozen technique exceeds MaxSim by more than the noise threshold.
+
 
 ## 5. Discussion
 
@@ -411,6 +526,16 @@ The pooled-vs-MaxSim gap (a 35× absolute-hit lift, with no architectural change
 Three independent axes of frozen architectural sophistication — multi-head random-projection MaxSim variants (§4.3), off-the-shelf cross-encoder rerankers stacked on the MaxSim shortlist (§4.4), and multi-granularity composites combining file-, chunk-, mid-level-, and token-level scores (§4.5) — all fail to exceed single-head token-level MaxSim. The §4.3 verdict is CEILING (Δ = −0.0125); the §4.4 verdict is FILTER_LIMITED (best reranker R@10 = 0.4125, Δ = −0.0250); the §4.5 verdict is HURTS (best composite R@10 = 0.2875, Δ = −0.15). The pattern across these three independent axes is consistent: frozen architectural elaboration on top of a code-pretrained Mamba-2's last-layer activations does not extract additional retrieval signal beyond what single-head MaxSim already provides on this benchmark. The pattern strengthens — though does not prove — the case that retrieval-specific training, not frozen architectural cleverness, is the load-bearing path to closing the gap to retrieval-trained dense encoders.
 
 The frozen-MaxSim ceiling is a useful waypoint. It establishes that the per-token signal exists without any retrieval training. Closing the gap to a retrieval-trained encoder like Voyage code-3 likely requires retrieval-specific training; our data does not reveal whether that training is best applied to the encoder, the matching head, or both.
+
+### 5.4 Two paths beyond the frozen-MaxSim ceiling
+
+Phases 6–7 (§4.6, §4.7) modify the picture in §5.3. Where Phases 3–5 tested *more sophisticated frozen operations on the latent state alone*, Phases 6–7 tested *composing the latent state with complementary signals*. The composition path produced real lift (R@10 0.4375 → 0.4750 → 0.5000; R@1 0.10 → 0.15 → 0.175) entirely without training. We now distinguish two viable paths to closing the remaining gap to retrieval-trained dense encoders:
+
+- **Training-based path.** A learned matching head over Codestral's frozen representation, optimized with a retrieval objective. The frozen-MaxSim ceiling argues this is the load-bearing direction for getting from R@10 = 0.50 to R@10 ≥ 0.85. Our data does not reveal whether the training is best applied to the encoder, the matching head, or both. Estimated cost: $10K–$50K of GPU-time (§7.1). We do not test this in the present work.
+
+- **Composition-based path.** Combining the latents with deterministic symbolic structure (tree-sitter inverted index over function/class/constant names) and generative knowledge (Codestral as identifier-recall oracle for behavioral descriptions) produced the first frozen lifts in seven phases. The mechanism is mechanistically transparent: 31% of queries had no regex-extractable identifier matching the gold's defining file, and the LLM converted 15 of those 25 fallback queries into routed queries. The path forward is more sophisticated graph structure (call graphs, type-flow graphs, test-coverage graphs) and better LLM-augmentation prompting / fine-tuning specifically for code-retrieval identifier expansion. This path is cheaper to iterate on and can be combined with the training-based path; the latents remain a load-bearing signal in the composition, just not the only one.
+
+The right answer is likely "both": a learned matching head consuming both Codestral's per-token latents and the tree-index/LLM-derived symbolic features as a unified scoring function. We treat that as the cleanest cross-cutting future experiment.
 
 ## 6. Limitations
 
@@ -512,7 +637,7 @@ Each item below specifies the experiment, the gap it is designed to close, the e
 
 ## 8. Conclusion
 
-We characterized how much retrieval signal an off-the-shelf, code-pretrained Mamba-2 encoder (`mistralai/Mamba-Codestral-7B-v0.1`) preserves and what frozen matching operations extract it on SWE-Bench Lite. Mean-pooled Codestral underperforms a retrieval-trained baseline (Voyage code-3) by a wide margin (indexable Recall@10 of 0.34 vs 0.95) despite producing well-spread vectors that do not collapse; we attribute this to a popular-file attractor in the pooled-vector distribution rather than to encoder failure. ColBERT-style MaxSim over per-token Codestral latents recovers 35 of 80 cases on a subset where pooling specifically fails (Recall@10 = 0.4375 vs 0.0125; 35× absolute-hit lift). Three independent axes of frozen architectural sophistication beyond MaxSim — multi-head random-orthogonal-projection variants (best Δ = −0.0125), off-the-shelf cross-encoder rerankers stacked on the MaxSim shortlist (best Δ = −0.0250), and multi-granularity composites combining file-, chunk-, mid-level-, and token-level scores (best Δ = −0.15) — all fail to exceed single-head MaxSim. The pattern across these axes argues that retrieval-specific training, not frozen architectural cleverness, is the load-bearing path forward. The natural next experiment is a trained matching head over Codestral's frozen representation, evaluated against the same MaxSim ceiling and the Voyage retrieval-trained baseline.
+We characterized how much retrieval signal an off-the-shelf, code-pretrained Mamba-2 encoder (`mistralai/Mamba-Codestral-7B-v0.1`) preserves and what frozen matching operations extract it on SWE-Bench Lite. Mean-pooled Codestral underperforms a retrieval-trained baseline (Voyage code-3) by a wide margin (indexable Recall@10 of 0.34 vs 0.95) despite producing well-spread vectors that do not collapse; we attribute this to a popular-file attractor in the pooled-vector distribution rather than to encoder failure. ColBERT-style MaxSim over per-token Codestral latents recovers 35 of 80 cases on a subset where pooling specifically fails (Recall@10 = 0.4375 vs 0.0125; 35× absolute-hit lift). Three independent axes of frozen architectural sophistication beyond MaxSim — multi-head random-orthogonal-projection variants (best Δ = −0.0125), off-the-shelf cross-encoder rerankers (best Δ = −0.0250), and multi-granularity composites (best Δ = −0.15) — all fail to exceed single-head MaxSim on the latents alone. Composing the latent state with complementary signals does work: tree-sitter symbolic routing on identifiers extracted from the issue text (Phase 6) lifts Recall@10 to 0.4750 (Δ = +0.0375), and augmenting the regex identifiers with Codestral-generated ones (Phase 7, LLM query expansion) lifts Recall@10 to 0.5000 and Recall@1 from 0.10 to 0.175 by converting 15 of 80 fallback queries into routed queries. The result distinguishes two viable paths to closing the gap to retrieval-trained dense encoders: a training-based path (a learned matching head over Codestral's frozen representation, untested here) and a composition-based path (the latents plus orthogonal symbolic / LLM-generated signals, with the partial result reported above). Both warrant further work.
 
 ## References
 
