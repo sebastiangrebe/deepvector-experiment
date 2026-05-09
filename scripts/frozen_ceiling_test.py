@@ -123,6 +123,12 @@ def main() -> int:
         files = list_eligible_files(repo_path)
         pool = encode_repo_pool(encoder, repo_path, files)
         cand_dev = [t.to(device) for t in pool.tokens]
+        try:
+            mem_gb = sum(t.numel() * t.element_size() for t in cand_dev) / 1e9
+            log.info("cand pool on %s: %d chunks, %.2f GB", device,
+                     len(cand_dev), mem_gb)
+        except Exception:
+            pass
 
         for t in tqdm(insts, desc=repo_slug, leave=False):
             if time.time() - t_start > budget_s:
@@ -178,6 +184,11 @@ def main() -> int:
                               "(pass rate %.1f%% < 50%%). Likely harness bug.",
                               sanity_failed, sanity_checked, 100 * pass_rate)
                     return 2
+
+        # Free repo's GPU candidate tensors before next repo to avoid OOM
+        del cand_dev, pool
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     # Aggregate per-method
     def _mean(rows, method, key):

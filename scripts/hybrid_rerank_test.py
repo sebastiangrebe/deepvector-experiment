@@ -146,6 +146,11 @@ def main() -> int:
                                     top_k=args.reranker_top_k)
             candidates_by_inst[t["instance_id"]] = ranked
 
+        # Free repo's GPU pool before next repo to avoid OOM accumulation
+        del cand_dev, pool
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
     # Free encoder VRAM before loading rerankers
     del encoder
     torch.cuda.empty_cache() if torch.cuda.is_available() else None

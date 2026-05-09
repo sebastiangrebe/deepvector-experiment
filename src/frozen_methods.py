@@ -84,25 +84,36 @@ def multi_head_maxsim_score(q_tokens: torch.Tensor,
                             candidate_tokens: list[torch.Tensor],
                             n_heads: int = 8,
                             seed: int = 42) -> torch.Tensor:
-    """Sum of MaxSim scores over n_heads disjoint orthogonal subspaces."""
+    """Sum of MaxSim scores over n_heads disjoint orthogonal subspaces.
+
+    Projects one candidate at a time to keep VRAM bounded. The naive
+    list-comprehension version materializes all projected candidates and
+    OOMs on large repos (e.g. matplotlib ~13 GB doubled to ~26 GB).
+    """
     d = q_tokens.shape[-1]
     if d % n_heads != 0:
         raise ValueError(f"d={d} not divisible by n_heads={n_heads}")
     d_head = d // n_heads
 
-    proj = get_projection(q_tokens, seed=seed)  # (d, d)
-    q_proj = q_tokens @ proj                    # (n_q, d)
-    cand_projs = [f @ proj for f in candidate_tokens]
+    proj = get_projection(q_tokens, seed=seed)        # (d, d)
+    q_proj = q_tokens @ proj                          # (n_q, d)
+    # Pre-normalize per-head query slices once (cheap, n_q * d).
+    q_heads = [F.normalize(q_proj[:, h * d_head:(h + 1) * d_head], dim=-1)
+               for h in range(n_heads)]
 
     out = torch.zeros(len(candidate_tokens), device=q_tokens.device,
                       dtype=q_tokens.dtype)
-    for h in range(n_heads):
-        s, e = h * d_head, (h + 1) * d_head
-        q_h = F.normalize(q_proj[:, s:e], dim=-1)
-        for i, f_p in enumerate(cand_projs):
-            f_h = F.normalize(f_p[:, s:e], dim=-1)
-            sim = q_h @ f_h.T                    # (n_q, n_f)
-            out[i] += sim.max(dim=-1).values.sum()
+    for i, f in enumerate(candidate_tokens):
+        f_proj = f @ proj                             # (n_f, d)
+        score = q_tokens.new_zeros(())
+        for h in range(n_heads):
+            s, e = h * d_head, (h + 1) * d_head
+            f_h = F.normalize(f_proj[:, s:e], dim=-1)
+            sim = q_heads[h] @ f_h.T                   # (n_q, n_f)
+            score = score + sim.max(dim=-1).values.sum()
+            del f_h, sim
+        out[i] = score
+        del f_proj
     return out
 
 
