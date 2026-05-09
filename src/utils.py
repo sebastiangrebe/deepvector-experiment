@@ -1,4 +1,5 @@
 """Shared utilities."""
+
 from __future__ import annotations
 
 import fnmatch
@@ -9,16 +10,22 @@ from typing import Iterable
 
 import torch
 
-
 # ─────────────────────────────────────────────────────────────────────
 # File filter (single source of truth for ALL retrievers)
 # ─────────────────────────────────────────────────────────────────────
 
 EXCLUDE_PATTERNS: list[str] = [
-    "*/tests/*", "*/test/*", "*_test.py", "*_tests.py", "test_*.py",
-    "*/docs/*", "*/doc/*",
-    "*/build/*", "*/dist/*", "*/.git/*",
-    "*/migrations/*",     # Django-specific noise
+    "*/tests/*",
+    "*/test/*",
+    "*_test.py",
+    "*_tests.py",
+    "test_*.py",
+    "*/docs/*",
+    "*/doc/*",
+    "*/build/*",
+    "*/dist/*",
+    "*/.git/*",
+    "*/migrations/*",  # Django-specific noise
     "*/__pycache__/*",
 ]
 INCLUDE_EXTENSIONS: list[str] = [".py"]
@@ -27,9 +34,11 @@ MAX_FILE_SIZE: int = 1_000_000  # 1 MB — matches published SWE-Bench retriever
 
 def _matches_any(rel_path: str, patterns: Iterable[str]) -> bool:
     norm = "/" + rel_path.replace("\\", "/").lstrip("/")
-    return any(fnmatch.fnmatch(norm, p if p.startswith("*") else "*" + p)
-               or fnmatch.fnmatch(norm, p)
-               for p in patterns)
+    return any(
+        fnmatch.fnmatch(norm, p if p.startswith("*") else "*" + p)
+        or fnmatch.fnmatch(norm, p)
+        for p in patterns
+    )
 
 
 def list_eligible_files(repo_path: Path) -> list[Path]:
@@ -91,7 +100,10 @@ def filter_stats(repo_path: Path) -> dict:
 # Torch / logging / paths
 # ─────────────────────────────────────────────────────────────────────
 
+
 def get_device() -> torch.device:
+    if torch.cuda.is_available():
+        return torch.device("cuda")
     if torch.backends.mps.is_available():
         return torch.device("mps")
     return torch.device("cpu")
