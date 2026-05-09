@@ -252,6 +252,14 @@ def main() -> int:
 
             all_ids = regex_ids + [i for i in llm_ids if i not in regex_ids]
 
+            # Phase29-vs-Phase30 fallback tracking. Build pool from regex IDs
+            # alone (this is exactly what Phase 2.9 sees). Compare to the
+            # combined-IDs pool.
+            phase29_pool_info = build_candidate_pool(tidx, regex_ids)
+            phase29_was_fallback = (phase29_pool_info["mode"] == "fallback_full")
+            llm_added_matches = [i for i in llm_ids
+                                  if tidx.lookup(i) and i not in regex_ids]
+
             # Per-id matched/unmatched in tree-index (computed once for diagnostics)
             regex_matched = [i for i in regex_ids if tidx.lookup(i)]
             regex_unmatched = [i for i in regex_ids if not tidx.lookup(i)]
@@ -315,6 +323,9 @@ def main() -> int:
                 "candidate_pool_size_final": len(cand_set),
                 "candidate_pool_mode": mode,
                 "fallback_to_full_corpus": (mode == "fallback_full"),
+                "phase29_was_fallback": phase29_was_fallback,
+                "phase30_still_fallback": (mode == "fallback_full"),
+                "llm_added_matches": llm_added_matches,
                 "gold_in_pool": bool(gold_set & cand_set),
                 "gold_files": list(gold_set),
                 "routed_top20": routed_paths,
@@ -384,6 +395,14 @@ def main() -> int:
         summary["llm_generation_failures"] = llm_failures
         summary["median_llm_latency_s"] = float(median(llm_latencies)
                                                   if llm_latencies else 0.0)
+        # Fallback-conversion stats: Phase 3.0's load-bearing claim
+        n29_fb = sum(1 for r in per_instance if r.get("phase29_was_fallback"))
+        n30_fb = sum(1 for r in per_instance if r.get("phase30_still_fallback"))
+        summary["phase29_fallback_count"] = n29_fb
+        summary["phase30_fallback_count"] = n30_fb
+        summary["fallback_converted_by_llm"] = n29_fb - n30_fb
+        summary["llm_added_match_total"] = sum(len(r.get("llm_added_matches", []))
+                                                for r in per_instance)
 
     # Sanity check 2: full-corpus MaxSim must reproduce Phase 2.5 baseline ±0.02.
     # Only enforced when the encoder matches the cached baseline's encoder

@@ -20,7 +20,17 @@ from src.utils import get_logger
 log = get_logger("llm_expansion")
 
 
-PROMPT = """Given the following GitHub issue, list specific Python class names, function names, constant names, or module paths most likely involved in the underlying bug. Output one identifier per line. No explanations, no numbering, no prose. Use only identifiers that exist in real Python codebases (e.g., Django, sympy, scikit-learn). Maximum 20 identifiers.
+PROMPT = """Given the following GitHub issue, list the specific, distinctive Python class names, method names, or constant names most likely involved in the underlying bug. Prefer:
+- Specific class names (e.g., ResolverMatch, ChangeList)
+- Distinctive method names (e.g., make_hashable, resolve_pattern)
+- Specific constants (e.g., FILE_UPLOAD_PERMISSIONS)
+
+Avoid:
+- Generic Python terms (e.g., self, cls, init)
+- Common standard library identifiers (e.g., dict, list)
+- Common configuration terms unless distinctive (e.g., DEBUG, URL)
+
+Output one identifier per line. No prose, no numbering, no explanations. Maximum 15 identifiers.
 
 Issue:
 {issue}
@@ -52,7 +62,7 @@ def _parse_output(text: str, max_n: int) -> list[str]:
 @torch.no_grad()
 def expand_query_to_identifiers(issue_text: str,
                                  encoder: MambaEncoder,
-                                 max_identifiers: int = 20,
+                                 max_identifiers: int = 15,
                                  max_new_tokens: int = 200,
                                  max_issue_chars: int = 4000,
                                  ) -> tuple[list[str], str]:
