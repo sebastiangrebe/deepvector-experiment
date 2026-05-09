@@ -2,7 +2,7 @@
 
 ## Abstract
 
-Selective state-space models (SSMs) such as Mamba scale linearly in sequence length, making them attractive encoders for long-context retrieval tasks. Whether their token-level hidden states preserve enough discriminative signal for code retrieval — and what matching operation extracts it — is unclear. We study this question on SWE-Bench Lite using `mistralai/Mamba-Codestral-7B-v0.1` as the encoder and a per-repo single-commit indexing protocol. We report four findings. **(1)** Mean-pooled Codestral vectors achieve indexable Recall@10 of 0.34 against Voyage code-3's 0.95, despite no vector collapse (per-repo pairwise cosine means in the 0.67–0.82 range) — retrieval failure here is in the aggregation operator, not the representation geometry. **(2)** On a 80-instance subset where Voyage retrieves the gold file in top-10 but Codestral mean-pooling does not, ColBERT-style MaxSim over per-token Codestral latents recovers 35 of those 80 (Recall@10 = 0.4375); mean-pooling in the same harness recovers 1 (Recall@10 = 0.0125), a 35× lift in absolute hits. **(3)** Adding frozen architectural structure beyond MaxSim — multi-head random orthogonal projections at H ∈ {4, 8, 16, 32} and an explicit late-interaction normalization variant — does not exceed single-head MaxSim; the best multi-head method scores 0.4250 (Δ = −0.0125 vs MaxSim). **(4)** Two off-the-shelf cross-encoder rerankers stacked on the MaxSim shortlist (`bge-reranker-v2-m3`, `cross-encoder/ms-marco-MiniLM-L-12-v2`) underperform the MaxSim filter alone (Recall@10 of 0.4125 and 0.3000 respectively). The work supports a single interpretation: discriminative signal exists at the per-token level of Codestral-Mamba but is destroyed by mean-pooling, and closing the gap to retrieval-trained dense encoders likely requires retrieval-specific training rather than a clever frozen matching head or off-the-shelf NLP rerankers. We do not evaluate trained matching; we leave this as future work.
+Selective state-space models (SSMs) such as Mamba scale linearly in sequence length, making them attractive encoders for long-context retrieval tasks. Whether their token-level hidden states preserve enough discriminative signal for code retrieval — and what matching operation extracts it — is unclear. We study this question on SWE-Bench Lite using `mistralai/Mamba-Codestral-7B-v0.1` as the encoder and a per-repo single-commit indexing protocol. We report four findings. **(1)** Mean-pooled Codestral vectors achieve indexable Recall@10 of 0.34 against Voyage code-3's 0.95, despite no vector collapse (per-repo pairwise cosine means in the 0.67–0.82 range) — retrieval failure here is in the aggregation operator, not the representation geometry. **(2)** On a 80-instance subset where Voyage retrieves the gold file in top-10 but Codestral mean-pooling does not, ColBERT-style MaxSim over per-token Codestral latents recovers 35 of those 80 (Recall@10 = 0.4375); mean-pooling in the same harness recovers 1 (Recall@10 = 0.0125), a 35× lift in absolute hits. **(3)** Adding frozen architectural structure beyond MaxSim — multi-head random orthogonal projections at H ∈ {4, 8, 16, 32}, an explicit late-interaction normalization variant, and multi-granularity composites combining file-level, sliding-window mid-level, and token-level scores — does not exceed single-head MaxSim. The best multi-head method scores 0.4250 (Δ = −0.0125); the best multi-granularity composite scores 0.2875 (Δ = −0.15). **(4)** Two off-the-shelf cross-encoder rerankers stacked on the MaxSim shortlist (`bge-reranker-v2-m3`, `cross-encoder/ms-marco-MiniLM-L-12-v2`) underperform the MaxSim filter alone (Recall@10 of 0.4125 and 0.3000 respectively). The work supports a single interpretation: discriminative signal exists at the per-token level of Codestral-Mamba but is destroyed by mean-pooling, and closing the gap to retrieval-trained dense encoders likely requires retrieval-specific training rather than a clever frozen matching head or off-the-shelf NLP rerankers. We do not evaluate trained matching; we leave this as future work.
 
 ## 1. Introduction
 
@@ -14,7 +14,7 @@ Our contributions are four findings, each negative or constrained, but together 
 
 - Mean-pooled Codestral underperforms Voyage code-3 on SWE-Bench Lite by a wide margin (indexable Recall@10 of 0.34 vs 0.95) despite producing well-spread vectors.
 - ColBERT-style MaxSim on Codestral per-token latents recovers a substantial fraction of mean-pooling's failures on the discriminating subset (Recall@10 = 0.4375 vs 0.0125; 35× absolute-hit lift).
-- Frozen multi-head projections beyond single-head MaxSim do not extract additional signal at this scale.
+- Frozen multi-head projections beyond single-head MaxSim do not extract additional signal at this scale; frozen multi-granularity composites (G0/G1/G2/G3 sum, max, and routed) actively harm retrieval (best Δ = −0.15).
 - Two cross-encoder rerankers trained on natural-language passage retrieval, applied to Codestral's MaxSim shortlist on SWE-Bench Lite, underperformed the shortlist alone; we attribute this narrowly to training-distribution mismatch and do not generalize to code-specific rerankers.
 
 The work is a case study, not a general claim about Mamba-based retrieval. Our caveats are explicit (§6).
@@ -306,6 +306,87 @@ The correct claim from these data is narrow: two cross-encoder rerankers trained
 
 We do *not* test code-specific rerankers (e.g., from Cohere or Voyage's commercial reranker offerings, or open-source code-trained cross-encoders if any exist at the time of writing). We cannot generalize beyond this configuration. A code-specific reranker, or a reranker fine-tuned on code-retrieval data, may behave differently and is left as future work (§7).
 
+### 4.5 Phase 5: Multi-granularity Matching
+
+#### Question
+
+Phase 4.3 tested whether *multi-head* sophistication beyond MaxSim helps. This phase tests whether *multi-granularity* sophistication helps: if queries operate at different granularities (some want global "what is this file about" matching, some want local "this exact identifier" matching), a frozen representation that exposes multiple granularity views and a matcher that selects or combines them might extract more signal than single-granularity token-level MaxSim.
+
+#### Method
+
+We extract four granularities from the same per-token Codestral latents (no re-encoding):
+
+- **G0 — file-level pool**: mean over all tokens of all chunks in a file → 1 vector of shape (D,) per file.
+- **G1 — chunk-level pool**: mean over each chunk's tokens → list of (D,) per file (Phase 1 baseline).
+- **G2 — sliding-window pool**: within each cached chunk tensor, take overlapping windows of 256 tokens with stride 128 and mean-pool each window. Approximates "function-sized" segments without parser-level metadata.
+- **G3 — token-level**: the cached chunk tensors verbatim (Phase 2.2 baseline).
+
+We test seven matching methods (`scripts/multigranular_test.py`, `src/multigranular.py`):
+
+- **`pooled_chunk`** — query mean-pool vs G1 (max over chunks). Phase 1 baseline reproduced on this subset.
+- **`pooled_file`** — query mean-pool vs G0.
+- **`func_pool`** — query mean-pool vs G2 (max over function-sized segments).
+- **`maxsim`** — Phase 2.2 baseline reproduced.
+- **`mg_sum`** — equal-weight sum of G0/G1/G2/G3 scores after per-query min-max normalization to [0,1] within the candidate set.
+- **`mg_max`** — per-query, per-file max across normalized G0/G1/G2/G3 scores.
+- **`mg_routed`** — heuristic per-query route to one granularity. Rule: if query token count < 30 and the text contains an identifier-like pattern (camelCase, snake_case, dot.notation), route to G3; if token count > 100 with no identifier pattern, route to G0; else G2.
+
+Critical implementation choice: the per-query min-max normalization makes `mg_sum` effectively a 4-way ensemble vote rather than a magnitude-calibrated combination. If `mg_max` wins but `mg_sum` does not, the interpretation is "one granularity matters per query" rather than "combining granularities helps." The output JSON records this and the next caveat as `interpretation_notes`.
+
+#### Tree-sitter caveat for G2
+
+We installed `tree-sitter` and `tree-sitter-python` and verified function/class boundary parsing on Python source. We did *not* use them for G2. The cached token-level latents (`data/maxsim_cache/*.pt`) were produced under a chunked-then-decoded encoding pipeline (file is tokenized, sliced into 1500-token windows, each window is decoded back to text, the decoded text is re-tokenized with a `# File: <rel>\n\n` header prefix, and the result is encoded). Mapping tree-sitter byte ranges back into cached tensor indices requires byte-offset metadata per cached chunk, which the cache does not store. Adding it forces re-encoding. We left tree-sitter G2 as future work (§7.6) and ran the experiment with sliding-window G2.
+
+#### Headline results (n = 80 discriminating subset)
+
+| Metric | pooled_chunk | pooled_file | func_pool | maxsim | mg_sum | mg_max | mg_routed |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Recall@1 | 0.0125 | 0.0000 | 0.0500 | 0.1000 | 0.0375 | 0.0250 | 0.0500 |
+| Recall@5 | 0.0125 | 0.0125 | 0.1500 | 0.3125 | 0.1375 | 0.1875 | 0.1375 |
+| Recall@10 | 0.0125 | 0.0500 | 0.1875 | **0.4375** | 0.2125 | 0.2875 | 0.1750 |
+| Recall@20 | 0.2000 | 0.1250 | 0.2750 | 0.5875 | 0.3625 | 0.4750 | 0.2500 |
+| MRR | 0.0250 | 0.0135 | 0.0884 | **0.2001** | 0.0926 | 0.1138 | 0.0813 |
+| Median latency (s) | 0.083 | 0.030 | 0.526 | 2.595 | 3.205 | 3.166 | 0.515 |
+
+The best multi-granularity composite is `mg_max` at Recall@10 = 0.2875, against single-head `maxsim` at 0.4375 (Δ = −0.15). The pre-registered verdict is **HURTS**: composite multi-granularity matching actively damages retrieval relative to single-granularity token-level MaxSim.
+
+`pooled_chunk` reproduces the Phase 1 collapsed-on-this-subset result (Recall@10 = 0.0125, by construction). `pooled_file` is even worse (0.0500 R@10) — adding more aggregation doesn't help when aggregation is the failure mode. `func_pool` (G2 alone) is the strongest single-granularity beyond `maxsim`, at Recall@10 = 0.1875. None of the composites recovers what MaxSim already extracts.
+
+The `sanity_pass_rate` is 0.975 (78/80 of `pooled_chunk` rankings overlap the cached Codestral baseline by ≥50%), unchanged from the Phase 4.3 reproduction.
+
+#### Routing distribution and rescue/regression counts
+
+The `mg_routed` heuristic routed 74 of 80 queries to G2 and 6 to G0. None routed to G3 (the strongest single granularity), because the heuristic's "tokens < 30 AND identifier-like" rule did not trigger on issue-text queries — SWE-Bench problem statements are long and contain natural-language sentences alongside any code identifiers. The router was naive enough that it selected an inferior granularity on most queries.
+
+Per-method rescues vs MaxSim (gold in this method's top-10 but not in MaxSim's top-10) and regressions vs MaxSim (the inverse):
+
+| Method | Rescues vs MaxSim | Regressions vs MaxSim |
+|---|---:|---:|
+| pooled_chunk | 0 | 34 |
+| pooled_file | 0 | 31 |
+| func_pool | 5 | 25 |
+| mg_sum | 0 | 18 |
+| mg_max | 3 | 15 |
+| mg_routed | 5 | 26 |
+
+Every multi-granularity variant has more regressions than rescues. Even `mg_max`, the least bad composite, sacrifices 15 instances MaxSim got right while gaining 3 MaxSim missed.
+
+#### G2 segment statistics
+
+Across the 80-instance subset's pooled candidate files: mean of 28.0 G2 segments per file, minimum 1, maximum 2828 (an outlier file from one of the larger candidate pools). Zero files yielded zero G2 segments, so the sliding-window extraction was robust at every file size. No fall-back was triggered.
+
+#### Interpretation
+
+Frozen multi-granularity composition introduces more noise than signal at this size class and benchmark. Three mechanistic explanations are consistent with the data, and we cannot distinguish among them without further work:
+
+1. **Granularity-mixing destroys MaxSim's contribution.** MaxSim's signal is concentrated in token-level matching against specific identifiers; mixing it equally with three coarser granularities (G0, G1, G2) dilutes the signal. The min-max normalization compounds this: G3's discriminative variance gets compressed into [0,1] alongside near-uniform G0 scores.
+
+2. **Sliding-window G2 is not the right semantic mid-level.** A function-boundary G2 might pool across more meaningful units. The HURTS result on sliding-window does not rule out semantic-boundary granularity helping; it rules out *this* granularity construction helping.
+
+3. **Routing heuristic is too coarse.** With 74 of 80 queries routed to G2 and 0 to G3, `mg_routed` is essentially "always-G2", which is dominated by single-granularity G2 (`func_pool`, Recall@10 = 0.1875). A routing function that learned which query → granularity from a small held-out set would address this; we did not test this.
+
+We treat the Phase 5 result as: frozen multi-granularity in the form we tested HURTS. Whether semantic-boundary granularity or a learned router would change this is left for future work (§7.6).
+
 
 ## 5. Discussion
 
@@ -327,7 +408,9 @@ We attribute the underperformance to training-distribution mismatch: rerankers l
 
 The pooled-vs-MaxSim gap (a 35× absolute-hit lift, with no architectural change to the encoder) is larger than the multi-head-vs-single-head gap (zero or slightly negative across all H we tested). For this size class of Mamba-2 encoder on this benchmark, the matching operation is more consequential than the architectural sophistication of the matching head. Mamba Retriever [Wang et al. 2024] takes the orthogonal approach of *training* a Mamba encoder for retrieval; our work suggests the natural complement: *training* a matching head over a code-pretrained Mamba's frozen representation, and comparing the two pathways to competitive retrieval quality.
 
-The frozen-MaxSim ceiling is a useful waypoint. It establishes that the per-token signal exists without any retrieval training. Closing the gap to a retrieval-trained encoder like Voyage code-3 likely requires retrieval-specific training; our data does not reveal whether that training is best applied to the encoder, the matching head, or both. Phase 2.6's CEILING verdict argues that frozen architectural cleverness is unlikely to substitute.
+Three independent axes of frozen architectural sophistication — multi-head random-projection MaxSim variants (§4.3), off-the-shelf cross-encoder rerankers stacked on the MaxSim shortlist (§4.4), and multi-granularity composites combining file-, chunk-, mid-level-, and token-level scores (§4.5) — all fail to exceed single-head token-level MaxSim. The §4.3 verdict is CEILING (Δ = −0.0125); the §4.4 verdict is FILTER_LIMITED (best reranker R@10 = 0.4125, Δ = −0.0250); the §4.5 verdict is HURTS (best composite R@10 = 0.2875, Δ = −0.15). The pattern across these three independent axes is consistent: frozen architectural elaboration on top of a code-pretrained Mamba-2's last-layer activations does not extract additional retrieval signal beyond what single-head MaxSim already provides on this benchmark. The pattern strengthens — though does not prove — the case that retrieval-specific training, not frozen architectural cleverness, is the load-bearing path to closing the gap to retrieval-trained dense encoders.
+
+The frozen-MaxSim ceiling is a useful waypoint. It establishes that the per-token signal exists without any retrieval training. Closing the gap to a retrieval-trained encoder like Voyage code-3 likely requires retrieval-specific training; our data does not reveal whether that training is best applied to the encoder, the matching head, or both.
 
 ## 6. Limitations
 
@@ -360,6 +443,8 @@ We list limitations exhaustively. Most are direct consequences of the case-study
 13. **Reranker context truncation.** We truncate file content to 6000 characters (~1500 tokens) before reranker input, which is comfortably under the smaller reranker's 512-token context but means longer files are seen only by their head. Tail content is untested.
 
 14. **Strict-sanity threshold is loose.** The 50%-overlap criterion catches gross harness drift but not subtle ranking shifts. Two of 80 instances failed the loose check (`sanity_pass_rate = 0.975`) and were retained; tightening the threshold could change the discriminating subset.
+
+15. **Phase 5 multi-granularity used sliding-window pools for G2** rather than semantic function/class boundaries; tree-sitter integration was attempted but blocked by the latent cache lacking byte-offset metadata. Semantic-boundary granularity may behave differently and is not tested here.
 
 ## 7. Future Work
 
@@ -415,9 +500,19 @@ Each item below specifies the experiment, the gap it is designed to close, the e
 
 **Approximate compute.** $10–$20 per benchmark, plus encoder loading and corpus indexing time.
 
+### 7.6 Semantic-boundary multi-granularity
+
+**Experiment.** Re-encode the SWE-Bench Lite corpus with the tokenizer's `offset_mapping` enabled, store the byte-offset → token-index map per chunk in the cache, and use tree-sitter Python to extract function/class byte ranges per file. Map those ranges to cached tensor token indices and build a semantic-boundary G2 in `src/multigranular.py`. Re-run `mg_max` and `mg_routed` with semantic G2 and compare against the §4.5 sliding-window numbers and the MaxSim baseline.
+
+**Gap closed.** Phase 5 found multi-granularity HURTS with sliding-window G2; the natural follow-up question is whether *semantic* mid-level granularity (functions, classes, methods) behaves differently. A NO_LIFT or STRONG_MULTIGRAN verdict on semantic G2 would resolve the interpretive ambiguity left by Phase 5.
+
+**Evidence required.** Recall@10 on the same 80-instance discriminating subset, with the routing distribution from `mg_routed` reported. A null result would be sufficient to claim the multi-granularity bet is dead in frozen form; a positive result would re-open it.
+
+**Approximate compute.** Re-encoding the test repos under the new cache schema is ~$8 (same as Phase 2.5 token-level encoding). Tree-sitter parse + tensor-index mapping is CPU-bound, ~30 minutes. Total ~$10.
+
 ## 8. Conclusion
 
-We characterized how much retrieval signal an off-the-shelf, code-pretrained Mamba-2 encoder (`mistralai/Mamba-Codestral-7B-v0.1`) preserves and what frozen matching operations extract it on SWE-Bench Lite. Mean-pooled Codestral underperforms a retrieval-trained baseline (Voyage code-3) by a wide margin (indexable Recall@10 of 0.34 vs 0.95) despite producing well-spread vectors that do not collapse; we attribute this to a popular-file attractor in the pooled-vector distribution rather than to encoder failure. ColBERT-style MaxSim over per-token Codestral latents recovers 35 of 80 cases on a subset where pooling specifically fails (Recall@10 = 0.4375 vs 0.0125; 35× absolute-hit lift). Adding frozen architectural sophistication beyond MaxSim — multi-head random-orthogonal-projection variants at H ∈ {4, 8, 16, 32} and a late-interaction-style normalization variant — does not exceed single-head MaxSim in our experiments (best multi-head Recall@10 = 0.4250; Δ = −0.0125). Two cross-encoder rerankers trained on natural-language passage retrieval, stacked on the MaxSim shortlist, underperformed the shortlist alone, which we attribute narrowly to training-distribution mismatch. The natural next experiment is a trained matching head over Codestral's frozen representation, evaluated against the same MaxSim ceiling and the Voyage retrieval-trained baseline.
+We characterized how much retrieval signal an off-the-shelf, code-pretrained Mamba-2 encoder (`mistralai/Mamba-Codestral-7B-v0.1`) preserves and what frozen matching operations extract it on SWE-Bench Lite. Mean-pooled Codestral underperforms a retrieval-trained baseline (Voyage code-3) by a wide margin (indexable Recall@10 of 0.34 vs 0.95) despite producing well-spread vectors that do not collapse; we attribute this to a popular-file attractor in the pooled-vector distribution rather than to encoder failure. ColBERT-style MaxSim over per-token Codestral latents recovers 35 of 80 cases on a subset where pooling specifically fails (Recall@10 = 0.4375 vs 0.0125; 35× absolute-hit lift). Three independent axes of frozen architectural sophistication beyond MaxSim — multi-head random-orthogonal-projection variants (best Δ = −0.0125), off-the-shelf cross-encoder rerankers stacked on the MaxSim shortlist (best Δ = −0.0250), and multi-granularity composites combining file-, chunk-, mid-level-, and token-level scores (best Δ = −0.15) — all fail to exceed single-head MaxSim. The pattern across these axes argues that retrieval-specific training, not frozen architectural cleverness, is the load-bearing path forward. The natural next experiment is a trained matching head over Codestral's frozen representation, evaluated against the same MaxSim ceiling and the Voyage retrieval-trained baseline.
 
 ## References
 
