@@ -22,10 +22,13 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 echo "[teardown] pulling results from $REMOTE:$REMOTE_PATH/data/results/"
 mkdir -p "$ROOT/data/results"
-scp -i "$SSH_KEY" -p \
-    "$REMOTE:$REMOTE_PATH/data/results/mamba_codestral_baseline.json" \
-    "$REMOTE:$REMOTE_PATH/data/results/dtype_sanity_codestral.json" \
-    "$ROOT/data/results/" || echo "[teardown] WARN: one or more result files missing"
+for f in mamba_codestral_baseline.json dtype_sanity_codestral.json \
+         maxsim_discrimination_test.json; do
+    scp -i "$SSH_KEY" -p "$REMOTE:$REMOTE_PATH/data/results/$f" \
+        "$ROOT/data/results/" 2>/dev/null \
+        && echo "[teardown] pulled $f" \
+        || echo "[teardown] (skip $f — missing on remote)"
+done
 
 echo "[teardown] pulling cloud_run log..."
 mkdir -p "$ROOT/data/logs"

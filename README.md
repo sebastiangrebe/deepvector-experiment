@@ -117,5 +117,31 @@ bash scripts/cloud_teardown.sh ubuntu@<INSTANCE_IP>
 ```
 
 Pulls `data/results/mamba_codestral_baseline.json`,
-`data/results/dtype_sanity_codestral.json`, and the `cloud_run.log` snapshot.
+`data/results/dtype_sanity_codestral.json`,
+`data/results/maxsim_discrimination_test.json` (if present),
+and the `cloud_run.log` snapshot.
 Then **terminate** the instance from the Lambda dashboard.
+
+### MaxSim discrimination test (Phase 2.5)
+
+After the Codestral baseline JSON is in `data/results/`, run the focused MaxSim
+test on the same H100 (env already prepared by `cloud_run.sh`):
+
+```bash
+.venv/bin/python scripts/maxsim_test.py \
+    --model-id mistralai/Mamba-Codestral-7B-v0.1 \
+    --dtype bfloat16 \
+    --max-test-instances 80 \
+    --top-k 20 \
+    --budget-hours 4
+```
+
+`--strict-sanity` is auto-enabled when the encoder matches the cached
+baseline's encoder. Aborts (exit 2) if Method A pooled rankings diverge from
+the cached Codestral baseline by >50% on the first 5 instances — that means
+a harness bug, not a meaningful result.
+
+Output: `data/results/maxsim_discrimination_test.json`. Token-level cache
+(~117 GB) lives in `data/maxsim_cache/`, gitignored, **not transferred back**.
+
+Estimated cost: ~3 h, ~$7.50 at $2.49/h.
