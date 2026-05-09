@@ -177,10 +177,19 @@ def main() -> int:
             indent=2,
         ))
 
+    skipped_rerankers: dict[str, str] = {}
+
     for spec_idx, spec in enumerate(selected_specs):
         if time.time() - t_start > budget_s:
             log.warning("Budget cap hit before reranker %s", spec.name); break
-        rr = build_reranker(spec, dtype=dtype)
+        try:
+            rr = build_reranker(spec, dtype=dtype)
+        except Exception as exc:
+            log.error("Reranker %s failed to load (%s: %s) — skipping",
+                      spec.name, type(exc).__name__, exc)
+            skipped_rerankers[spec.name] = f"{type(exc).__name__}: {exc}"
+            reranker_results.pop(spec.name, None)
+            continue
 
         first_iid_logged = False
         for iid, ranked in tqdm(candidates_by_inst.items(),
@@ -297,6 +306,7 @@ def main() -> int:
         "dtype": args.dtype,
         "n_test_instances": summary["n"],
         "summary": summary,
+        "skipped_rerankers": skipped_rerankers,
         "first_instance_top3": first_instance_top3,
         "maxsim_only": maxsim_only,
         "rerankers": reranker_results,
