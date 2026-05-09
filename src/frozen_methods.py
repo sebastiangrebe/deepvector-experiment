@@ -4,6 +4,11 @@ All methods operate on already-encoded token-level latents (shape (T, D)).
 No training. The same orthogonal projection matrix is used across all
 queries and files (seeded) so scores are comparable.
 
+Memory model: candidates are streamed from CPU one chunk at a time. Each
+method moves a single chunk to the query's device, scores it, and drops the
+GPU copy before moving to the next. Avoids OOM on large repos (matplotlib
+pool ~35 GB; H100 80 GB minus encoder leaves no room for full pool).
+
 Methods:
     pooled            — mean-pool both sides, cosine
     maxsim            — ColBERT-style late interaction, single-head
@@ -26,7 +31,6 @@ import torch.nn.functional as F
 @lru_cache(maxsize=8)
 def _orthogonal_projection(d: int, device_str: str, dtype_str: str,
                            seed: int = 42) -> torch.Tensor:
-    """Generate a (d, d) orthogonal matrix. Cached so all calls reuse."""
     g = torch.Generator(device="cpu").manual_seed(seed)
     raw = torch.randn(d, d, generator=g, dtype=torch.float32)
     q, _ = torch.linalg.qr(raw)
@@ -35,7 +39,6 @@ def _orthogonal_projection(d: int, device_str: str, dtype_str: str,
 
 
 def get_projection(reference: torch.Tensor, seed: int = 42) -> torch.Tensor:
-    """Return cached orthogonal projection matched to reference's device/dtype."""
     return _orthogonal_projection(
         d=int(reference.shape[-1]),
         device_str=str(reference.device),
@@ -44,95 +47,132 @@ def get_projection(reference: torch.Tensor, seed: int = 42) -> torch.Tensor:
     )
 
 
+def _to_device(f: torch.Tensor, device: torch.device) -> torch.Tensor:
+    return f if f.device == device else f.to(device, non_blocking=True)
+
+
 # ─────────────────────────────────────────────────────────────────────
 # Method 0: pooled cosine
 # ─────────────────────────────────────────────────────────────────────
 
 def pooled_score(q_tokens: torch.Tensor,
                  candidate_tokens: list[torch.Tensor]) -> torch.Tensor:
-    """Mean-pool both sides, cosine. Returns (N,)."""
+    device = q_tokens.device
     q_pool = F.normalize(q_tokens.mean(dim=0, keepdim=True), dim=-1)
-    out = torch.empty(len(candidate_tokens), device=q_tokens.device,
-                      dtype=q_tokens.dtype)
+    out = torch.empty(len(candidate_tokens), device=device, dtype=q_tokens.dtype)
     for i, f in enumerate(candidate_tokens):
-        f_pool = F.normalize(f.mean(dim=0, keepdim=True), dim=-1)
+        f_d = _to_device(f, device)
+        f_pool = F.normalize(f_d.mean(dim=0, keepdim=True), dim=-1)
         out[i] = (q_pool @ f_pool.T).squeeze()
+        del f_pool
+        if f_d is not f:
+            del f_d
     return out
 
 
 # ─────────────────────────────────────────────────────────────────────
-# Method 1: MaxSim (single-head ColBERT-style)
+# Method 1: MaxSim (single-head)
 # ─────────────────────────────────────────────────────────────────────
 
 def maxsim_score(q_tokens: torch.Tensor,
                  candidate_tokens: list[torch.Tensor]) -> torch.Tensor:
+    device = q_tokens.device
     qn = F.normalize(q_tokens, dim=-1)
-    out = torch.empty(len(candidate_tokens), device=q_tokens.device,
-                      dtype=q_tokens.dtype)
+    out = torch.empty(len(candidate_tokens), device=device, dtype=q_tokens.dtype)
     for i, f in enumerate(candidate_tokens):
-        fn = F.normalize(f, dim=-1)
+        f_d = _to_device(f, device)
+        fn = F.normalize(f_d, dim=-1)
         sim = qn @ fn.T
         out[i] = sim.max(dim=-1).values.sum()
+        del sim, fn
+        if f_d is not f:
+            del f_d
     return out
 
 
 # ─────────────────────────────────────────────────────────────────────
-# Method 2: multi-head MaxSim with random orthogonal projections
+# Method 2: multi-head MaxSim (random orthogonal projections, sum)
 # ─────────────────────────────────────────────────────────────────────
 
 def multi_head_maxsim_score(q_tokens: torch.Tensor,
                             candidate_tokens: list[torch.Tensor],
                             n_heads: int = 8,
                             seed: int = 42) -> torch.Tensor:
-    """Sum of MaxSim scores over n_heads disjoint orthogonal subspaces.
-
-    Projects one candidate at a time to keep VRAM bounded. The naive
-    list-comprehension version materializes all projected candidates and
-    OOMs on large repos (e.g. matplotlib ~13 GB doubled to ~26 GB).
-    """
+    device = q_tokens.device
     d = q_tokens.shape[-1]
     if d % n_heads != 0:
         raise ValueError(f"d={d} not divisible by n_heads={n_heads}")
     d_head = d // n_heads
 
-    proj = get_projection(q_tokens, seed=seed)        # (d, d)
-    q_proj = q_tokens @ proj                          # (n_q, d)
-    # Pre-normalize per-head query slices once (cheap, n_q * d).
+    proj = get_projection(q_tokens, seed=seed)
+    q_proj = q_tokens @ proj
     q_heads = [F.normalize(q_proj[:, h * d_head:(h + 1) * d_head], dim=-1)
                for h in range(n_heads)]
 
-    out = torch.zeros(len(candidate_tokens), device=q_tokens.device,
-                      dtype=q_tokens.dtype)
+    out = torch.zeros(len(candidate_tokens), device=device, dtype=q_tokens.dtype)
     for i, f in enumerate(candidate_tokens):
-        f_proj = f @ proj                             # (n_f, d)
+        f_d = _to_device(f, device)
+        f_proj = f_d @ proj
         score = q_tokens.new_zeros(())
         for h in range(n_heads):
             s, e = h * d_head, (h + 1) * d_head
             f_h = F.normalize(f_proj[:, s:e], dim=-1)
-            sim = q_heads[h] @ f_h.T                   # (n_q, n_f)
+            sim = q_heads[h] @ f_h.T
             score = score + sim.max(dim=-1).values.sum()
             del f_h, sim
         out[i] = score
         del f_proj
+        if f_d is not f:
+            del f_d
     return out
 
 
 # ─────────────────────────────────────────────────────────────────────
-# Method 3: late-interaction (H=8 + explicit pre-projection L2 norm)
+# Method 3: late-interaction (H=8 + pre-projection L2 norm)
 # ─────────────────────────────────────────────────────────────────────
 
 def late_interaction_score(q_tokens: torch.Tensor,
                            candidate_tokens: list[torch.Tensor],
                            n_heads: int = 8,
                            seed: int = 42) -> torch.Tensor:
-    """L2-normalize each token before projection, then multi-head MaxSim."""
+    """L2-normalize each token (pre-projection) → multi-head MaxSim.
+
+    Streams candidates from CPU; never materializes a normalized list.
+    """
+    device = q_tokens.device
+    d = q_tokens.shape[-1]
+    if d % n_heads != 0:
+        raise ValueError(f"d={d} not divisible by n_heads={n_heads}")
+    d_head = d // n_heads
+
     qn = F.normalize(q_tokens, dim=-1)
-    cand_n = [F.normalize(f, dim=-1) for f in candidate_tokens]
-    return multi_head_maxsim_score(qn, cand_n, n_heads=n_heads, seed=seed)
+    proj = get_projection(qn, seed=seed)
+    q_proj = qn @ proj
+    q_heads = [F.normalize(q_proj[:, h * d_head:(h + 1) * d_head], dim=-1)
+               for h in range(n_heads)]
+
+    out = torch.zeros(len(candidate_tokens), device=device, dtype=q_tokens.dtype)
+    for i, f in enumerate(candidate_tokens):
+        f_d = _to_device(f, device)
+        fn = F.normalize(f_d, dim=-1)
+        f_proj = fn @ proj
+        del fn
+        score = q_tokens.new_zeros(())
+        for h in range(n_heads):
+            s, e = h * d_head, (h + 1) * d_head
+            f_h = F.normalize(f_proj[:, s:e], dim=-1)
+            sim = q_heads[h] @ f_h.T
+            score = score + sim.max(dim=-1).values.sum()
+            del f_h, sim
+        out[i] = score
+        del f_proj
+        if f_d is not f:
+            del f_d
+    return out
 
 
 # ─────────────────────────────────────────────────────────────────────
-# Generic dedup-to-files (matches Voyage / mamba_pooled / maxsim)
+# Generic dedup-to-files
 # ─────────────────────────────────────────────────────────────────────
 
 def dedup_to_files(scores: torch.Tensor, chunk_files: list[str],
@@ -156,7 +196,7 @@ def dedup_to_files(scores: torch.Tensor, chunk_files: list[str],
 @dataclass
 class MethodSpec:
     name: str
-    fn: callable          # (q, cands, **kwargs) → (N,) scores
+    fn: callable
     kwargs: dict
 
 

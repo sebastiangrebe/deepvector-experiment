@@ -132,7 +132,9 @@ def main() -> int:
         }
 
         pool = encode_repo_pool(encoder, repo_path, files)
-        cand_dev = [t.to(device) for t in pool.tokens]
+        # Stream candidates from CPU; large pools (matplotlib ~35 GB) don't
+        # fit alongside the 14 GB encoder on a 80 GB H100.
+        cand_cpu = pool.tokens
 
         for t in tqdm(insts, desc=f"maxsim {repo_slug}", leave=False):
             inst = all_instances[t["instance_id"]]
@@ -141,13 +143,12 @@ def main() -> int:
             q_tok = out.last_hidden[0][mask].to(device)
 
             with torch.no_grad():
-                scores = maxsim_score(q_tok, cand_dev)
+                scores = maxsim_score(q_tok, cand_cpu)
             ranked = dedup_to_files(scores, pool.chunk_files,
                                     top_k=args.reranker_top_k)
             candidates_by_inst[t["instance_id"]] = ranked
 
-        # Free repo's GPU pool before next repo to avoid OOM accumulation
-        del cand_dev, pool
+        del cand_cpu, pool
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 

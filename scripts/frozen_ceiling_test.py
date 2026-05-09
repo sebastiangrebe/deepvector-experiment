@@ -122,11 +122,14 @@ def main() -> int:
         repo_path = ensure_repo_at(repo_slug, sample_inst.base_commit)
         files = list_eligible_files(repo_path)
         pool = encode_repo_pool(encoder, repo_path, files)
-        cand_dev = [t.to(device) for t in pool.tokens]
+        # Keep candidates on CPU. Methods stream chunks to GPU one at a time
+        # to bound VRAM (matplotlib pool alone is ~35 GB; can't fit alongside
+        # the 14 GB encoder on a 80 GB H100).
+        cand_cpu = pool.tokens
         try:
-            mem_gb = sum(t.numel() * t.element_size() for t in cand_dev) / 1e9
-            log.info("cand pool on %s: %d chunks, %.2f GB", device,
-                     len(cand_dev), mem_gb)
+            mem_gb = sum(t.numel() * t.element_size() for t in cand_cpu) / 1e9
+            log.info("cand pool on cpu: %d chunks, %.2f GB (streamed to %s)",
+                     len(cand_cpu), mem_gb, device)
         except Exception:
             pass
 
@@ -148,7 +151,7 @@ def main() -> int:
             for spec in methods:
                 t0 = time.time()
                 with torch.no_grad():
-                    scores = spec.fn(q_tok, cand_dev, **spec.kwargs)
+                    scores = spec.fn(q_tok, cand_cpu, **spec.kwargs)
                 dt = time.time() - t0
                 ranked = dedup_to_files(scores, pool.chunk_files,
                                         top_k=args.top_k)
@@ -185,8 +188,8 @@ def main() -> int:
                               sanity_failed, sanity_checked, 100 * pass_rate)
                     return 2
 
-        # Free repo's GPU candidate tensors before next repo to avoid OOM
-        del cand_dev, pool
+        # Free CPU pool tensors before next repo (per-repo cache hits realloc)
+        del cand_cpu, pool
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
