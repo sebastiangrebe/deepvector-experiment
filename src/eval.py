@@ -198,6 +198,8 @@ def run_eval(
              len(by_repo))
 
     results: list[InstanceResult] = []
+    quality_per_repo: dict[str, dict] = {}
+    index_sizes_mb: dict[str, float] = {}
     pbar = tqdm(total=len(instances), desc="instances")
 
     for repo_slug, insts in by_repo.items():
@@ -215,6 +217,11 @@ def run_eval(
         retriever.index(repo_path, files)
         n_indexed = len(files)
         indexed_set = {f.relative_to(repo_path).as_posix() for f in files}
+        # Collect optional diagnostics (mamba_pooled exposes these)
+        if hasattr(retriever, "last_quality") and retriever.last_quality:
+            quality_per_repo[repo_slug] = retriever.last_quality
+        if hasattr(retriever, "last_index_size_mb") and retriever.last_index_size_mb:
+            index_sizes_mb[repo_slug] = retriever.last_index_size_mb
 
         for inst in insts:
             t0 = time.time()
@@ -246,6 +253,10 @@ def run_eval(
     pbar.close()
 
     summary = summarize(retriever.name, results)
+    if quality_per_repo:
+        summary["quality_per_repo"] = quality_per_repo
+        summary["total_index_size_mb"] = sum(index_sizes_mb.values())
+        summary["index_size_mb_per_repo"] = index_sizes_mb
     return {"retriever": retriever.name, "summary": summary,
             "results": [_result_to_dict(r) for r in results]}
 

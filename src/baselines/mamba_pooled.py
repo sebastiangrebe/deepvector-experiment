@@ -23,6 +23,7 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
+from src.diagnostics import index_quality_stats
 from src.encoder import MambaEncoder
 from src.utils import get_logger, project_root
 
@@ -105,6 +106,8 @@ class MambaPooledRetriever:
         self.index_obj = None
         self.chunks: list[Chunk] = []
         self.chunk_files: list[str] = []  # parallel to FAISS rows
+        self.last_quality: dict | None = None
+        self.last_index_size_mb: float | None = None
 
     def index(self, repo_path: Path, files: list[Path]) -> None:
         self._reset()
@@ -121,7 +124,11 @@ class MambaPooledRetriever:
             self.chunks = [Chunk(**c) for c in meta["chunks"]]
             self.chunk_files = [c.file_rel for c in self.chunks]
             self._build_faiss(embeds)
-            log.info("Loaded %d chunks from cache", len(self.chunks))
+            self.last_quality = index_quality_stats(embeds)
+            self.last_index_size_mb = cache_file.stat().st_size / 1024 / 1024
+            log.info("Loaded %d chunks from cache  pairwise_cos.mean=%.4f",
+                     len(self.chunks),
+                     self.last_quality["pairwise_cos_sample"]["mean"])
             return
 
         log.info("Indexing %s: %d files", repo_path.name, len(files))
@@ -152,6 +159,11 @@ class MambaPooledRetriever:
         self.chunks = all_chunks
         self.chunk_files = [c.file_rel for c in all_chunks]
         self._build_faiss(embeds)
+        self.last_quality = index_quality_stats(embeds)
+        self.last_index_size_mb = cache_file.stat().st_size / 1024 / 1024
+        q = self.last_quality["pairwise_cos_sample"]
+        log.info("Quality: pairwise_cos.mean=%.4f std=%.4f  collapse=%s",
+                 q["mean"], q["std"], self.last_quality["collapse_flag"])
 
     def _encode_chunks(self, chunks: list[Chunk]) -> np.ndarray:
         if not chunks:
