@@ -5,6 +5,7 @@ data/latents/
 data/voyage_cache/
 data/mamba_cache/
 data/maxsim_cache/
+data/tree_index_cache/
 data/swe_bench_lite.json
 
 # Secrets
