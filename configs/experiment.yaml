@@ -1,0 +1,37 @@
+experiment:
+  name: deepvector_v0
+  seed: 42
+
+dataset:
+  name: princeton-nlp/SWE-bench_Lite
+  cache_path: data/swe_bench_lite.json
+
+encoder:
+  # Default for smoke tests — small, fast, HF-compatible.
+  model_id: state-spaces/mamba-130m-hf
+
+  # Recommended for real eval — Mamba-2, 7B, code-pretrained, HF-compatible.
+  # eval_model_id: mistralai/Mamba-Codestral-7B-v0.1
+
+  device: auto       # auto-picks mps > cpu
+  dtype: float32     # use bfloat16 for the 7B model
+  max_length: 2048
+
+retrieval:
+  layer1:
+    top_k: 50
+    index: faiss
+    pooling: mean
+  layer2:
+    top_k: 10
+
+baselines:
+  voyage:
+    model: voyage-code-3
+    dim: 1024
+  mamba_pooled: {}
+
+eval:
+  metric: recall@10
+  latency_budget_x: 2.0
+  threshold_points: 3

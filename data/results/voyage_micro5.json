@@ -1,0 +1,249 @@
+{
+  "retriever": "voyage_code_3",
+  "summary": {
+    "retriever": "voyage_code_3",
+    "n_total": 5,
+    "n_indexable": 4,
+    "raw": {
+      "n": 5,
+      "recall@1": 0.2,
+      "recall@5": 0.4,
+      "recall@10": 0.4,
+      "recall@20": 0.6,
+      "mrr": 0.2525,
+      "median_latency_ms": 425.37784576416016
+    },
+    "indexable": {
+      "n": 4,
+      "recall@1": 0.25,
+      "recall@5": 0.5,
+      "recall@10": 0.5,
+      "recall@20": 0.75,
+      "mrr": 0.315625,
+      "median_latency_ms": 434.59486961364746
+    },
+    "hardest_repo": {
+      "name": "sqlfluff/sqlfluff",
+      "raw_recall@10": 0.4
+    },
+    "easiest_repo": {
+      "name": "sqlfluff/sqlfluff",
+      "raw_recall@10": 0.4
+    },
+    "per_repo": {
+      "sqlfluff/sqlfluff": {
+        "n_raw": 5,
+        "n_indexable": 4,
+        "raw_recall@10": 0.4,
+        "indexable_recall@10": 0.5
+      }
+    }
+  },
+  "results": [
+    {
+      "instance_id": "sqlfluff__sqlfluff-1625",
+      "repo": "sqlfluff/sqlfluff",
+      "n_gold": 1,
+      "n_indexed": 149,
+      "gold_files": [
+        "src/sqlfluff/rules/L031.py"
+      ],
+      "ranked_top20": [
+        "src/sqlfluff/rules/L031.py",
+        "src/sqlfluff/rules/L026.py",
+        "src/sqlfluff/rules/L025.py",
+        "src/sqlfluff/rules/L011.py",
+        "src/sqlfluff/rules/L027.py",
+        "src/sqlfluff/rules/L020.py",
+        "src/sqlfluff/rules/L032.py",
+        "src/sqlfluff/rules/L013.py",
+        "src/sqlfluff/core/rules/analysis/select.py",
+        "src/sqlfluff/rules/L028.py",
+        "src/sqlfluff/rules/L012.py",
+        "src/sqlfluff/core/dialects/common.py",
+        "src/sqlfluff/rules/L029.py",
+        "src/sqlfluff/rules/L042.py",
+        "src/sqlfluff/dialects/dialect_tsql.py",
+        "src/sqlfluff/dialects/dialect_ansi.py",
+        "src/sqlfluff/rules/L024.py",
+        "src/sqlfluff/rules/L045.py",
+        "src/sqlfluff/rules/L015.py",
+        "src/sqlfluff/rules/L005.py"
+      ],
+      "recall": {
+        "1": 1.0,
+        "5": 1.0,
+        "10": 1.0,
+        "20": 1.0
+      },
+      "mrr": 1.0,
+      "latency_ms": 539.1948223114014,
+      "gold_in_index": true,
+      "notes": ""
+    },
+    {
+      "instance_id": "sqlfluff__sqlfluff-2419",
+      "repo": "sqlfluff/sqlfluff",
+      "n_gold": 1,
+      "n_indexed": 149,
+      "gold_files": [
+        "src/sqlfluff/rules/L060.py"
+      ],
+      "ranked_top20": [
+        "src/sqlfluff/rules/L040.py",
+        "src/sqlfluff/rules/L030.py",
+        "src/sqlfluff/rules/L049.py",
+        "src/sqlfluff/rules/L031.py",
+        "src/sqlfluff/rules/L035.py",
+        "src/sqlfluff/rules/L047.py",
+        "src/sqlfluff/rules/L043.py",
+        "src/sqlfluff/rules/L003.py",
+        "src/sqlfluff/core/rules/base.py",
+        "src/sqlfluff/core/linter/common.py",
+        "src/sqlfluff/rules/L033.py",
+        "src/sqlfluff/rules/L032.py",
+        "src/sqlfluff/rules/L011.py",
+        "src/sqlfluff/rules/L022.py",
+        "src/sqlfluff/rules/L019.py",
+        "src/sqlfluff/rules/L020.py",
+        "src/sqlfluff/rules/L029.py",
+        "src/sqlfluff/rules/L010.py",
+        "src/sqlfluff/rules/L025.py",
+        "src/sqlfluff/rules/L004.py"
+      ],
+      "recall": {
+        "1": 0.0,
+        "5": 0.0,
+        "10": 0.0,
+        "20": 0.0
+      },
+      "mrr": 0.0,
+      "latency_ms": 358.61897468566895,
+      "gold_in_index": false,
+      "notes": ""
+    },
+    {
+      "instance_id": "sqlfluff__sqlfluff-1733",
+      "repo": "sqlfluff/sqlfluff",
+      "n_gold": 1,
+      "n_indexed": 149,
+      "gold_files": [
+        "src/sqlfluff/rules/L039.py"
+      ],
+      "ranked_top20": [
+        "src/sqlfluff/rules/L018.py",
+        "src/sqlfluff/rules/L003.py",
+        "src/sqlfluff/rules/L023.py",
+        "src/sqlfluff/rules/L036.py",
+        "src/sqlfluff/rules/L016.py",
+        "src/sqlfluff/rules/L019.py",
+        "src/sqlfluff/rules/L005.py",
+        "src/sqlfluff/rules/L004.py",
+        "src/sqlfluff/rules/L022.py",
+        "src/sqlfluff/rules/L041.py",
+        "src/sqlfluff/rules/L038.py",
+        "src/sqlfluff/core/rules/base.py",
+        "src/sqlfluff/rules/L015.py",
+        "src/sqlfluff/core/parser/grammar/sequence.py",
+        "src/sqlfluff/rules/L031.py",
+        "src/sqlfluff/rules/L039.py",
+        "src/sqlfluff/core/linter/common.py",
+        "src/sqlfluff/rules/L001.py",
+        "src/sqlfluff/rules/L002.py",
+        "src/sqlfluff/core/linter/linter.py"
+      ],
+      "recall": {
+        "1": 0.0,
+        "5": 0.0,
+        "10": 0.0,
+        "20": 1.0
+      },
+      "mrr": 0.0625,
+      "latency_ms": 443.81189346313477,
+      "gold_in_index": true,
+      "notes": ""
+    },
+    {
+      "instance_id": "sqlfluff__sqlfluff-1517",
+      "repo": "sqlfluff/sqlfluff",
+      "n_gold": 1,
+      "n_indexed": 149,
+      "gold_files": [
+        "src/sqlfluff/core/parser/helpers.py"
+      ],
+      "ranked_top20": [
+        "src/sqlfluff/core/parser/grammar/sequence.py",
+        "src/sqlfluff/core/rules/base.py",
+        "src/sqlfluff/core/linter/common.py",
+        "src/sqlfluff/dialects/dialect_ansi.py",
+        "src/sqlfluff/core/linter/linter.py",
+        "src/sqlfluff/core/parser/grammar/delimited.py",
+        "src/sqlfluff/core/parser/grammar/base.py",
+        "src/sqlfluff/core/parser/__init__.py",
+        "src/sqlfluff/core/parser/lexer.py",
+        "src/sqlfluff/core/parser/segments/base.py",
+        "src/sqlfluff/rules/L019.py",
+        "src/sqlfluff/rules/L039.py",
+        "src/sqlfluff/core/linter/__init__.py",
+        "src/sqlfluff/rules/L003.py",
+        "src/sqlfluff/core/__init__.py",
+        "src/sqlfluff/core/parser/segments/meta.py",
+        "src/sqlfluff/core/parser/grammar/greedy.py",
+        "src/sqlfluff/rules/L038.py",
+        "src/sqlfluff/cli/commands.py",
+        "src/sqlfluff/core/parser/grammar/__init__.py"
+      ],
+      "recall": {
+        "1": 0.0,
+        "5": 0.0,
+        "10": 0.0,
+        "20": 0.0
+      },
+      "mrr": 0.0,
+      "latency_ms": 392.9152488708496,
+      "gold_in_index": true,
+      "notes": ""
+    },
+    {
+      "instance_id": "sqlfluff__sqlfluff-1763",
+      "repo": "sqlfluff/sqlfluff",
+      "n_gold": 1,
+      "n_indexed": 149,
+      "gold_files": [
+        "src/sqlfluff/core/linter/linted_file.py"
+      ],
+      "ranked_top20": [
+        "src/sqlfluff/core/linter/common.py",
+        "plugins/sqlfluff-templater-dbt/sqlfluff_templater_dbt/templater.py",
+        "src/sqlfluff/cli/commands.py",
+        "src/sqlfluff/core/linter/linter.py",
+        "src/sqlfluff/core/linter/linted_file.py",
+        "src/sqlfluff/core/rules/base.py",
+        "src/sqlfluff/core/templaters/jinja.py",
+        "src/sqlfluff/rules/L031.py",
+        "src/sqlfluff/api/simple.py",
+        "src/sqlfluff/core/parser/segments/base.py",
+        "src/sqlfluff/core/templaters/python.py",
+        "src/sqlfluff/core/parser/markers.py",
+        "src/sqlfluff/rules/L003.py",
+        "src/sqlfluff/rules/L001.py",
+        "src/sqlfluff/core/config.py",
+        "src/sqlfluff/core/errors.py",
+        "src/sqlfluff/cli/formatters.py",
+        "src/sqlfluff/core/parser/grammar/base.py",
+        "src/sqlfluff/core/__init__.py",
+        "src/sqlfluff/core/templaters/base.py"
+      ],
+      "recall": {
+        "1": 0.0,
+        "5": 1.0,
+        "10": 1.0,
+        "20": 1.0
+      },
+      "mrr": 0.2,
+      "latency_ms": 425.37784576416016,
+      "gold_in_index": true,
+      "notes": ""
+    }
+  ]
+}

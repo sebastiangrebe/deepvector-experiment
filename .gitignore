@@ -1,0 +1,41 @@
+# Data (large/local) — keep data/results tracked so cloud runs can push
+# results back via git commits
+data/repos/
+data/latents/
+data/voyage_cache/
+data/mamba_cache/
+data/swe_bench_lite.json
+
+# Secrets
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Model weights
+*.pt
+*.safetensors
+*.bin
+*.ckpt
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# wandb
+wandb/
+
+# References (cloned, not tracked)
+references/
